@@ -8,6 +8,7 @@ import logging
 import random
 
 import smtplib
+from urllib.parse import urlparse
 from email.mime.text import MIMEText
 
 
@@ -177,10 +178,16 @@ def send_email(sign_list):
     if ('HOST' not in ENV or 'FROM' not in ENV or 'TO' not in ENV or 'AUTH' not in ENV):
         logger.error("未配置邮箱")
         return
-    HOST = ENV['HOST']
+    host_value = ENV['HOST'].strip()
     FROM = ENV['FROM']
     TO = ENV['TO'].split('#')
     AUTH = ENV['AUTH']
+    parsed_host = urlparse(host_value if '://' in host_value else f'//{host_value}')
+    host = parsed_host.hostname
+    port = parsed_host.port or 25
+    if not host:
+        logger.error("邮件HOST配置无效：%s", host_value)
+        return
     length = len(sign_list)
     subject = f"{time.strftime('%Y-%m-%d', time.localtime())} 签到{length}个贴吧"
     body = """
@@ -205,11 +212,18 @@ def send_email(sign_list):
         """
     msg = MIMEText(body, 'html', 'utf-8')
     msg['subject'] = subject
-    smtp = smtplib.SMTP()
-    smtp.connect(HOST)
-    smtp.login(FROM, AUTH)
-    smtp.sendmail(FROM, TO, msg.as_string())
-    smtp.quit()
+    try:
+        if port == 465 or parsed_host.scheme == 'smtps':
+            smtp = smtplib.SMTP_SSL(host, port, timeout=20)
+        else:
+            smtp = smtplib.SMTP(host, port, timeout=20)
+            if port == 587:
+                smtp.starttls()
+        smtp.login(FROM, AUTH)
+        smtp.sendmail(FROM, TO, msg.as_string())
+        smtp.quit()
+    except Exception:
+        logger.exception("邮件发送失败，请检查HOST、端口、邮箱账号和授权码")
 
 def main():
     if ('BDUSS' not in ENV):
